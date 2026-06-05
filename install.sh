@@ -6,7 +6,7 @@
 #
 # Environment variables (all optional):
 #   PATCHFLY_BINARY_URL   Override default binary CDN URL
-#                         default: https://is3.cloudhost.id/moccilabs/patchfly
+#                         default: https://cdn.patchfly.dev
 #   PATCHFLY_VERSION      Version to install (default: latest)
 #   PATCHFLY_INSTALL      Install location (default: ~/.patchfly/bin)
 
@@ -15,9 +15,9 @@ set -euo pipefail
 BINARY_NAME="patchfly"
 INSTALL_DIR="${PATCHFLY_INSTALL:-$HOME/.patchfly/bin}"
 VERSION="${PATCHFLY_VERSION:-latest}"
-# Default binary CDN (IDCloudHost S3 hosting Patchfly releases).
+# Default binary CDN (cdn.patchfly.dev fronts the cdn.patchfly.dev bucket).
 # Override with PATCHFLY_BINARY_URL=... to self-host or use a different bucket.
-BINARY_URL="${PATCHFLY_BINARY_URL:-https://is3.cloudhost.id/moccilabs/patchfly}"
+BINARY_URL="${PATCHFLY_BINARY_URL:-https://cdn.patchfly.dev}"
 BINARY_URL="${BINARY_URL%/}"  # strip trailing slash
 
 # ---------------------------------------------------------------------------

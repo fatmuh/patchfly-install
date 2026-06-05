@@ -5,7 +5,7 @@
 #
 # Environment variables (all optional):
 #   $env:PATCHFLY_BINARY_URL   Override default binary CDN URL
-#                              default: https://is3.cloudhost.id/moccilabs/patchfly
+#                              default: https://cdn.patchfly.dev
 #   $env:PATCHFLY_VERSION      Version to install (default: latest)
 #   $env:PATCHFLY_INSTALL      Install location
 #                              default: $env:USERPROFILE\.patchfly\bin
@@ -15,9 +15,9 @@ $ErrorActionPreference = 'Stop'
 $BinaryName = 'patchfly.exe'
 $InstallDir = if ($env:PATCHFLY_INSTALL) { $env:PATCHFLY_INSTALL } else { Join-Path $env:USERPROFILE '.patchfly\bin' }
 $Version = if ($env:PATCHFLY_VERSION) { $env:PATCHFLY_VERSION } else { 'latest' }
-# Default binary CDN (IDCloudHost S3 hosting Patchfly releases).
+# Default binary CDN (cdn.patchfly.dev fronts the cdn.patchfly.dev bucket).
 # Override with $env:PATCHFLY_BINARY_URL=... to self-host.
-$BinaryUrl = if ($env:PATCHFLY_BINARY_URL) { $env:PATCHFLY_BINARY_URL } else { 'https://is3.cloudhost.id/moccilabs/patchfly' }
+$BinaryUrl = if ($env:PATCHFLY_BINARY_URL) { $env:PATCHFLY_BINARY_URL } else { 'https://cdn.patchfly.dev' }
 $BinaryUrl = $BinaryUrl.TrimEnd('/')
 
 # ---------------------------------------------------------------------------
