@@ -9,20 +9,16 @@ Binaries are hosted on **S3-compatible storage** (Cloudflare R2, AWS S3, Backbla
 ### macOS / Linux
 
 ```bash
-# Set your binary CDN URL first
-export PATCHFLY_BINARY_URL="https://pub-xxxxxxxx.r2.dev"
-
 curl --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/fatmuh/patchfly-install/main/install.sh -sSf | bash
 ```
 
 ### Windows (PowerShell)
 
 ```powershell
-$env:PATCHFLY_BINARY_URL = "https://pub-xxxxxxxx.r2.dev"
 iwr -UseBasicParsing 'https://raw.githubusercontent.com/fatmuh/patchfly-install/main/install.ps1'|iex
 ```
 
-> ⚠️ **`PATCHFLY_BINARY_URL` is required** — the script needs to know where your S3/R2 bucket is. This is the only public config the user must provide.
+> ✅ **No setup required** — default binary CDN is hardcoded. Override with `$env:PATCHFLY_BINARY_URL` (PowerShell) or `PATCHFLY_BINARY_URL` (bash) to self-host.
 
 ## What It Does
 
@@ -65,25 +61,28 @@ The script expects this object layout in your S3/R2 bucket:
 | Backblaze B2 | `https://f000.backblazeb2.com/file/{bucket}` |
 | MinIO (self-hosted) | `https://minio.your-domain.com/{bucket}` |
 
-## Environment Variables
+## Environment Variables (all optional)
 
 | Var | Default | Description |
 |---|---|---|
-| `PATCHFLY_BINARY_URL` | *(empty)* | **Required.** Public base URL of your S3/R2 bucket |
+| `PATCHFLY_BINARY_URL` | `https://is3.cloudhost.id/moccilabs/patchfly` | Override the binary CDN URL |
 | `PATCHFLY_VERSION` | `latest` | Specific version to install (e.g. `0.1.0`) |
 | `PATCHFLY_INSTALL` | `~/.patchfly/bin` | Install location |
 
 ## Examples
 
 ```bash
-# Install latest
-PATCHFLY_BINARY_URL="https://pub-xxx.r2.dev" bash <(curl -sSf https://raw.githubusercontent.com/fatmuh/patchfly-install/main/install.sh)
+# Install latest (default CDN)
+curl -sSf https://raw.githubusercontent.com/fatmuh/patchfly-install/main/install.sh | bash
 
 # Install specific version
-PATCHFLY_BINARY_URL="https://cdn.your-domain.com" PATCHFLY_VERSION=0.1.0 bash <(curl -sSf https://raw.githubusercontent.com/fatmuh/patchfly-install/main/install.sh)
+PATCHFLY_VERSION=0.1.0 curl -sSf https://raw.githubusercontent.com/fatmuh/patchfly-install/main/install.sh | bash
+
+# Self-host (use your own S3/R2 bucket)
+PATCHFLY_BINARY_URL="https://my-bucket.s3.region.amazonaws.com" curl -sSf https://raw.githubusercontent.com/fatmuh/patchfly-install/main/install.sh | bash
 
 # Install to custom path
-PATCHFLY_BINARY_URL="https://pub-xxx.r2.dev" PATCHFLY_INSTALL=/usr/local/bin bash <(curl -sSf ...)
+PATCHFLY_INSTALL=/usr/local/bin curl -sSf ... | bash
 
 # Verify
 patchfly --version

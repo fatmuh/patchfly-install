@@ -1,20 +1,24 @@
 # Patchfly CLI installer for Windows (PowerShell).
 #
-# Usage (R2/S3):
-#   $env:PATCHFLY_BINARY_URL = "https://pub-xxx.r2.dev"
+# One-liner (no setup required):
 #   iwr -UseBasicParsing 'https://raw.githubusercontent.com/fatmuh/patchfly-install/main/install.ps1'|iex
 #
-# Environment variables:
-#   $env:PATCHFLY_BINARY_URL   Base URL of the S3/R2 public bucket (REQUIRED)
+# Environment variables (all optional):
+#   $env:PATCHFLY_BINARY_URL   Override default binary CDN URL
+#                              default: https://is3.cloudhost.id/moccilabs/patchfly
 #   $env:PATCHFLY_VERSION      Version to install (default: latest)
-#   $env:PATCHFLY_INSTALL      Install location (default: $env:USERPROFILE\.patchfly\bin)
+#   $env:PATCHFLY_INSTALL      Install location
+#                              default: $env:USERPROFILE\.patchfly\bin
 
 $ErrorActionPreference = 'Stop'
 
 $BinaryName = 'patchfly.exe'
 $InstallDir = if ($env:PATCHFLY_INSTALL) { $env:PATCHFLY_INSTALL } else { Join-Path $env:USERPROFILE '.patchfly\bin' }
 $Version = if ($env:PATCHFLY_VERSION) { $env:PATCHFLY_VERSION } else { 'latest' }
-$BinaryUrl = if ($env:PATCHFLY_BINARY_URL) { $env:PATCHFLY_BINARY_URL } else { '' }
+# Default binary CDN (IDCloudHost S3 hosting Patchfly releases).
+# Override with $env:PATCHFLY_BINARY_URL=... to self-host.
+$BinaryUrl = if ($env:PATCHFLY_BINARY_URL) { $env:PATCHFLY_BINARY_URL } else { 'https://is3.cloudhost.id/moccilabs/patchfly' }
+$BinaryUrl = $BinaryUrl.TrimEnd('/')
 
 # ---------------------------------------------------------------------------
 # Pretty output
@@ -31,38 +35,17 @@ $Arch = $env:PROCESSOR_ARCHITECTURE
 switch ($Arch) {
   'AMD64' { $Arch = 'x64' }
   'ARM64' { $Arch = 'arm64' }
-  default { Error "Unsupported arch: $Arch" }
+  default { Error "Unsupported arch: $Arch. Supported: AMD64, ARM64." }
 }
 $OS = 'windows'
 $Asset = "patchfly-$OS-$Arch.exe"
-Info "Detected: $OS / $Arch"
-
-# ---------------------------------------------------------------------------
-# Validate config
-# ---------------------------------------------------------------------------
-if (-not $BinaryUrl) {
-  Error 'PATCHFLY_BINARY_URL is not set.'
-  Write-Host ''
-  Write-Host '  PATCHFLY_BINARY_URL should be the public URL of your S3/R2 bucket,' -ForegroundColor Gray
-  Write-Host '  e.g. https://pub-xxxxxxxx.r2.dev' -ForegroundColor Gray
-  Write-Host '       https://s3.idcloudhost.com/moccilabs/patchfly' -ForegroundColor Gray
-  Write-Host '       https://cdn.patchfly.dev' -ForegroundColor Gray
-  Write-Host ''
-  Write-Host 'Full example (R2):' -ForegroundColor Gray
-  Write-Host '  $env:PATCHFLY_BINARY_URL = "https://pub-xxxxxxxx.r2.dev"' -ForegroundColor Gray
-  Write-Host '  iwr -UseBasicParsing https://raw.githubusercontent.com/fatmuh/patchfly-install/main/install.ps1 | iex' -ForegroundColor Gray
-  Write-Host ''
-  Write-Host 'Full example (IDCloudHost S3):' -ForegroundColor Gray
-  Write-Host '  $env:PATCHFLY_BINARY_URL = "https://s3.idcloudhost.com/moccilabs/patchfly"' -ForegroundColor Gray
-  Write-Host '  iwr -UseBasicParsing https://raw.githubusercontent.com/fatmuh/patchfly-install/main/install.ps1 | iex' -ForegroundColor Gray
-}
-$BinaryUrl = $BinaryUrl.TrimEnd('/')
+Info "Detected platform: $OS / $Arch"
 
 # ---------------------------------------------------------------------------
 # Resolve version
 # ---------------------------------------------------------------------------
 $VersionPath = if ($Version -eq 'latest') { 'latest' } else { "v$Version" }
-Success "Version: $VersionPath"
+Info "Version: $VersionPath"
 
 # ---------------------------------------------------------------------------
 # Set up temp dir
@@ -72,7 +55,7 @@ New-Item -ItemType Directory -Path $Tmp | Out-Null
 
 try {
   $DownloadUrl = "$BinaryUrl/cli/$VersionPath/$Asset"
-  Info "Downloading: $DownloadUrl"
+  Info "Downloading from: $BinaryUrl/cli/$VersionPath/$Asset"
 
   $Target = Join-Path $Tmp $BinaryName
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -81,14 +64,16 @@ try {
   } catch {
     $code = $_.Exception.Response.StatusCode.value__
     if (-not $code) { $code = 'unknown' }
-    Error "Download failed (HTTP $code) for: $DownloadUrl"
+    Error "Download failed (HTTP $code) for: $DownloadUrl`n`n  Troubleshooting:`n    - Check your internet connection`n    - Verify the release exists at: ${BinaryUrl}/cli/${VersionPath}/`n    - Try a specific version: `$env:PATCHFLY_VERSION=0.1.0 ...`n    - Self-host? Set `$env:PATCHFLY_BINARY_URL=... to your own bucket"
   }
 
   if (-not (Test-Path $Target) -or (Get-Item $Target).Length -eq 0) {
     Error "Downloaded file is empty or missing: $DownloadUrl"
   }
 
-  # Verify SHA-256 if available
+  # ---------------------------------------------------------------------------
+  # Verify SHA-256 (if sidecar exists)
+  # ---------------------------------------------------------------------------
   $ShaUrl = "$BinaryUrl/cli/$VersionPath/$Asset.sha256"
   $ShaFile = Join-Path $Tmp "$Asset.sha256"
   try {
@@ -99,13 +84,11 @@ try {
       if ($expected -eq $actual) {
         Success 'SHA-256 verified'
       } else {
-        Warn "SHA-256 mismatch"
-        Warn "  expected: $expected"
-        Warn "  actual:   $actual"
+        Warn "SHA-256 mismatch (continuing anyway)"
       }
     }
   } catch {
-    # SHA file not available — skip verification (not fatal)
+    # SHA file not available - skip verification
   }
 
   $Size = [math]::Round((Get-Item $Target).Length / 1MB, 2)
@@ -126,15 +109,12 @@ try {
   # ---------------------------------------------------------------------------
   $currentPath = [Environment]::GetEnvironmentVariable('Path', 'User')
   if ($currentPath -like "*$InstallDir*") {
-    Success "Already in PATH - you can run: patchfly --version"
+    Success "Already in PATH - run: patchfly --version"
   } else {
-    Warn 'Not in PATH yet. Adding to user PATH...'
+    Warn "Not in PATH yet. Adding to user PATH..."
     [Environment]::SetEnvironmentVariable('Path', "$currentPath;$InstallDir", 'User')
     $env:Path = "$env:Path;$InstallDir"
     Success "Added $InstallDir to user PATH (current shell updated; new shells will need restart)"
-
-    Warn 'To persist for ALL new PowerShell windows, run this once:'
-    Write-Host '  [Environment]::SetEnvironmentVariable("Path", $env:Path, "User")' -ForegroundColor DarkGray
   }
 
   Write-Host ''

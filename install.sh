@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
 # Patchfly CLI installer for macOS and Linux.
 #
-# Usage (R2/S3):
-#   PATCHFLY_BINARY_URL="https://pub-xxx.r2.dev" \
-#     curl --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/fatmuh/patchfly-install/main/install.sh -sSf | bash
+# One-liner (no setup required):
+#   curl --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/fatmuh/patchfly-install/main/install.sh -sSf | bash
 #
-# Environment variables:
-#   PATCHFLY_BINARY_URL   Base URL of the S3/R2 public bucket (REQUIRED)
-#                         e.g. https://pub-xxxxxxxx.r2.dev
-#                              https://patchfly-cli.s3.amazonaws.com
-#                              https://cdn.patchfly.dev
+# Environment variables (all optional):
+#   PATCHFLY_BINARY_URL   Override default binary CDN URL
+#                         default: https://is3.cloudhost.id/moccilabs/patchfly
 #   PATCHFLY_VERSION      Version to install (default: latest)
 #   PATCHFLY_INSTALL      Install location (default: ~/.patchfly/bin)
 
@@ -18,7 +15,10 @@ set -euo pipefail
 BINARY_NAME="patchfly"
 INSTALL_DIR="${PATCHFLY_INSTALL:-$HOME/.patchfly/bin}"
 VERSION="${PATCHFLY_VERSION:-latest}"
-BINARY_URL="${PATCHFLY_BINARY_URL:-}"
+# Default binary CDN (IDCloudHost S3 hosting Patchfly releases).
+# Override with PATCHFLY_BINARY_URL=... to self-host or use a different bucket.
+BINARY_URL="${PATCHFLY_BINARY_URL:-https://is3.cloudhost.id/moccilabs/patchfly}"
+BINARY_URL="${BINARY_URL%/}"  # strip trailing slash
 
 # ---------------------------------------------------------------------------
 # Pretty output
@@ -29,9 +29,9 @@ else
   BOLD=""; GREEN=""; YELLOW=""; RED=""; RESET=""
 fi
 info()    { printf "${BOLD}==>${RESET} %s\n" "$*"; }
-success() { printf "${GREEN}✓${RESET} %s\n" "$*"; }
+success() { printf "${GREEN}\xe2\x9c\x93${RESET} %s\n" "$*"; }
 warn()    { printf "${YELLOW}!${RESET} %s\n" "$*" >&2; }
-error()   { printf "${RED}✗${RESET} %s\n" "$*" >&2; }
+error()   { printf "${RED}\xe2\x9c\x97${RESET} %s\n" "$*" >&2; }
 
 # ---------------------------------------------------------------------------
 # Detect OS and arch
@@ -40,39 +40,18 @@ OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 case "$OS" in
   linux)  OS="linux" ;;
   darwin) OS="macos" ;;
-  *) error "Unsupported OS: $OS"; exit 1 ;;
+  *) error "Unsupported OS: $OS. Patchfly CLI supports macOS and Linux."; exit 1 ;;
 esac
 
 ARCH="$(uname -m)"
 case "$ARCH" in
   x86_64|amd64)  ARCH="x64" ;;
   aarch64|arm64) ARCH="arm64" ;;
-  *) error "Unsupported arch: $ARCH"; exit 1 ;;
+  *) error "Unsupported arch: $ARCH. Supported: x86_64, aarch64 (arm64)."; exit 1 ;;
 esac
 
 ASSET="${BINARY_NAME}-${OS}-${ARCH}"
-[[ "$OS" == "windows" ]] && ASSET="${ASSET}.exe"
-info "Detected: ${OS}/${ARCH}"
-
-# ---------------------------------------------------------------------------
-# Validate config
-# ---------------------------------------------------------------------------
-if [ -z "$BINARY_URL" ]; then
-  error "PATCHFLY_BINARY_URL is not set."
-  echo ""
-  echo "  PATCHFLY_BINARY_URL should be the public URL of your S3/R2 bucket,"
-  echo "  e.g. https://pub-xxxxxxxx.r2.dev or https://cdn.patchfly.dev"
-  echo ""
-  echo "Full example (R2):"
-  echo "  PATCHFLY_BINARY_URL='https://pub-xxxxxxxx.r2.dev' \\"
-  echo "    curl --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/fatmuh/patchfly-install/main/install.sh -sSf | bash"
-  echo ""
-  echo "Full example (IDCloudHost S3):"
-  echo "  PATCHFLY_BINARY_URL='https://s3.idcloudhost.com/moccilabs/patchfly' \\"
-  echo "    curl --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/fatmuh/patchfly-install/main/install.sh -sSf | bash"
-  exit 1
-fi
-BINARY_URL="${BINARY_URL%/}"  # strip trailing slash
+info "Detected platform: ${OS}/${ARCH}"
 
 # ---------------------------------------------------------------------------
 # Resolve version (default: latest)
@@ -82,7 +61,7 @@ if [ "$VERSION" = "latest" ]; then
 else
   VERSION_PATH="v$VERSION"
 fi
-success "Version: $VERSION_PATH"
+info "Version: $VERSION_PATH"
 
 # ---------------------------------------------------------------------------
 # Set up temp dir
@@ -90,13 +69,12 @@ success "Version: $VERSION_PATH"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 BINARY_PATH="$INSTALL_DIR/$BINARY_NAME"
-INSTALLED=false
 
 # ---------------------------------------------------------------------------
-# Download from S3/R2
+# Download binary
 # ---------------------------------------------------------------------------
 DOWNLOAD_URL="${BINARY_URL}/cli/${VERSION_PATH}/${ASSET}"
-info "Downloading: $DOWNLOAD_URL"
+info "Downloading from: $BINARY_URL/cli/${VERSION_PATH}/${ASSET}"
 
 HTTP_CODE="000"
 if command -v curl >/dev/null 2>&1; then
@@ -113,18 +91,21 @@ fi
 if [ "$HTTP_CODE" != "200" ] || [ ! -s "$TMP/$BINARY_NAME" ]; then
   error "Download failed (HTTP $HTTP_CODE) for: $DOWNLOAD_URL"
   echo ""
-  echo "Possible causes:"
-  echo "  - Wrong PATCHFLY_BINARY_URL (check spelling, must end without trailing slash)"
-  echo "  - Version $VERSION not released yet"
-  echo "  - Bucket not public / not configured for public read"
+  echo "  Troubleshooting:"
+  echo "    - Check your internet connection"
+  echo "    - Verify the release exists at: ${BINARY_URL}/cli/${VERSION_PATH}/"
+  echo "    - Try a specific version: PATCHFLY_VERSION=0.1.0 ..."
+  echo "    - Self-host? Set PATCHFLY_BINARY_URL=... to your own bucket"
   exit 1
 fi
 
-# Verify SHA-256 if available
+# ---------------------------------------------------------------------------
+# Verify SHA-256 (if sidecar exists)
+# ---------------------------------------------------------------------------
 SHA_URL="${BINARY_URL}/cli/${VERSION_PATH}/${ASSET}.sha256"
 SHA_FILE="$TMP/${ASSET}.sha256"
+SHA_OK=false
 if command -v curl >/dev/null 2>&1 && curl -sSL -o "$SHA_FILE" "$SHA_URL" 2>/dev/null && [ -s "$SHA_FILE" ]; then
-  info "Verifying SHA-256..."
   EXPECTED=$(awk '{print $1}' "$SHA_FILE")
   if command -v shasum >/dev/null 2>&1; then
     ACTUAL=$(shasum -a 256 "$TMP/$BINARY_NAME" | awk '{print $1}')
@@ -133,25 +114,20 @@ if command -v curl >/dev/null 2>&1 && curl -sSL -o "$SHA_FILE" "$SHA_URL" 2>/dev
   fi
   if [ -n "${ACTUAL:-}" ] && [ "$EXPECTED" = "$ACTUAL" ]; then
     success "SHA-256 verified"
+    SHA_OK=true
   else
-    warn "SHA-256 mismatch — file may be corrupted"
-    warn "  expected: $EXPECTED"
-    warn "  actual:   ${ACTUAL:-unknown}"
+    warn "SHA-256 mismatch (continuing anyway)"
   fi
 fi
-
-success "Downloaded $(du -h "$TMP/$BINARY_NAME" | cut -f1)"
-INSTALLED=true
 
 # ---------------------------------------------------------------------------
 # Install
 # ---------------------------------------------------------------------------
-if [ "$INSTALLED" = true ]; then
-  mkdir -p "$INSTALL_DIR"
-  chmod +x "$TMP/$BINARY_NAME"
-  mv -f "$TMP/$BINARY_NAME" "$BINARY_PATH"
-  success "Installed to: $BINARY_PATH"
-fi
+FILE_SIZE=$(du -h "$TMP/$BINARY_NAME" | cut -f1)
+mkdir -p "$INSTALL_DIR"
+chmod +x "$TMP/$BINARY_NAME"
+mv -f "$TMP/$BINARY_NAME" "$BINARY_PATH"
+success "Installed $FILE_SIZE to: $BINARY_PATH"
 
 # ---------------------------------------------------------------------------
 # PATH setup
@@ -171,7 +147,7 @@ esac
 
 echo ""
 if [ "$in_path" = true ]; then
-  success "Already in PATH — run: $BINARY_NAME --version"
+  success "Already in PATH - run: $BINARY_NAME --version"
 else
   warn "Not in PATH yet. Add to your shell rc:"
   echo ""
@@ -184,7 +160,7 @@ else
       echo "" >> "$SHELL_RC"
       echo "# Patchfly CLI" >> "$SHELL_RC"
       echo "$PATH_LINE" >> "$SHELL_RC"
-      success "Added to $SHELL_RC — restart shell or: source $SHELL_RC"
+      success "Added to $SHELL_RC - restart shell or: source $SHELL_RC"
     fi
   fi
 fi
