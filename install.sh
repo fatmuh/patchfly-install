@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
 # Patchfly CLI installer for macOS and Linux.
 #
-# Usage:
-#   curl --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/fatmuh/patchfly/main/install/install.sh -sSf | bash
+# Usage (R2/S3):
+#   PATCHFLY_BINARY_URL="https://pub-xxx.r2.dev" \
+#     curl --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/fatmuh/patchfly-install/main/install.sh -sSf | bash
 #
-# Options (via env vars):
-#   PATCHFLY_VERSION    Specific version to install (default: latest)
-#   PATCHFLY_INSTALL    Install location (default: ~/.patchfly/bin)
-#   PATCHFLY_REPO       GitHub repo (default: fatmuh/patchfly)
+# Environment variables:
+#   PATCHFLY_BINARY_URL   Base URL of the S3/R2 public bucket (REQUIRED)
+#                         e.g. https://pub-xxxxxxxx.r2.dev
+#                              https://patchfly-cli.s3.amazonaws.com
+#                              https://cdn.patchfly.dev
+#   PATCHFLY_VERSION      Version to install (default: latest)
+#   PATCHFLY_INSTALL      Install location (default: ~/.patchfly/bin)
 
 set -euo pipefail
 
-REPO="${PATCHFLY_REPO:-fatmuh/patchfly-cli-binaries}"
 BINARY_NAME="patchfly"
 INSTALL_DIR="${PATCHFLY_INSTALL:-$HOME/.patchfly/bin}"
 VERSION="${PATCHFLY_VERSION:-latest}"
+BINARY_URL="${PATCHFLY_BINARY_URL:-}"
 
 # ---------------------------------------------------------------------------
 # Pretty output
@@ -47,89 +51,93 @@ case "$ARCH" in
 esac
 
 ASSET="${BINARY_NAME}-${OS}-${ARCH}"
+[[ "$OS" == "windows" ]] && ASSET="${ASSET}.exe"
 info "Detected: ${OS}/${ARCH}"
 
 # ---------------------------------------------------------------------------
-# Resolve version
+# Validate config
+# ---------------------------------------------------------------------------
+if [ -z "$BINARY_URL" ]; then
+  error "PATCHFLY_BINARY_URL is not set."
+  echo ""
+  echo "  PATCHFLY_BINARY_URL should be the public URL of your S3/R2 bucket,"
+  echo "  e.g. https://pub-xxxxxxxx.r2.dev or https://cdn.patchfly.dev"
+  echo ""
+  echo "Full example:"
+  echo "  PATCHFLY_BINARY_URL='https://pub-xxxxxxxx.r2.dev' \\"
+  echo "    curl --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/fatmuh/patchfly-install/main/install.sh -sSf | bash"
+  exit 1
+fi
+BINARY_URL="${BINARY_URL%/}"  # strip trailing slash
+
+# ---------------------------------------------------------------------------
+# Resolve version (default: latest)
 # ---------------------------------------------------------------------------
 if [ "$VERSION" = "latest" ]; then
-  info "Resolving latest version..."
-  if command -v curl >/dev/null 2>&1; then
-    VERSION=$(curl -sSL "https://api.github.com/repos/${REPO}/releases/latest" \
-              | grep '"tag_name"' | head -1 | sed -E 's/.*"v?([^"]+)".*/\1/' || true)
-  elif command -v wget >/dev/null 2>&1; then
-    VERSION=$(wget -qO- "https://api.github.com/repos/${REPO}/releases/latest" \
-              | grep '"tag_name"' | head -1 | sed -E 's/.*"v?([^"]+)".*/\1/' || true)
-  fi
-  if [ -z "$VERSION" ]; then
-    warn "Could not resolve latest version (no releases yet or no network)."
-    VERSION="0.0.0-source"
-  else
-    success "Latest version: v$VERSION"
-  fi
+  VERSION_PATH="latest"
 else
-  info "Requested version: v$VERSION"
+  VERSION_PATH="v$VERSION"
 fi
+success "Version: $VERSION_PATH"
 
 # ---------------------------------------------------------------------------
 # Set up temp dir
 # ---------------------------------------------------------------------------
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-
 BINARY_PATH="$INSTALL_DIR/$BINARY_NAME"
 INSTALLED=false
 
 # ---------------------------------------------------------------------------
-# Try downloading prebuilt binary from GitHub Releases
+# Download from S3/R2
 # ---------------------------------------------------------------------------
-if [ "$VERSION" != "0.0.0-source" ]; then
-  RELEASE_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${ASSET}"
-  info "Trying prebuilt binary: $RELEASE_URL"
+DOWNLOAD_URL="${BINARY_URL}/cli/${VERSION_PATH}/${ASSET}"
+info "Downloading: $DOWNLOAD_URL"
 
-  HTTP_CODE="000"
-  if command -v curl >/dev/null 2>&1; then
-    HTTP_CODE=$(curl -sSL -w "%{http_code}" -o "$TMP/$ASSET" "$RELEASE_URL" 2>/dev/null || echo "000")
-  elif command -v wget >/dev/null 2>&1; then
-    if wget -q -O "$TMP/$ASSET" "$RELEASE_URL" 2>/dev/null; then
-      HTTP_CODE="200"
-    fi
+HTTP_CODE="000"
+if command -v curl >/dev/null 2>&1; then
+  HTTP_CODE=$(curl -sSL -w "%{http_code}" -o "$TMP/$BINARY_NAME" "$DOWNLOAD_URL" 2>/dev/null || echo "000")
+elif command -v wget >/dev/null 2>&1; then
+  if wget -q -O "$TMP/$BINARY_NAME" "$DOWNLOAD_URL" 2>/dev/null; then
+    HTTP_CODE="200"
   fi
+else
+  error "Need curl or wget installed"
+  exit 1
+fi
 
-  if [ "$HTTP_CODE" = "200" ] && [ -s "$TMP/$ASSET" ]; then
-    success "Downloaded prebuilt binary ($(du -h "$TMP/$ASSET" | cut -f1))"
-    mv "$TMP/$ASSET" "$TMP/$BINARY_NAME"
-    INSTALLED=true
+if [ "$HTTP_CODE" != "200" ] || [ ! -s "$TMP/$BINARY_NAME" ]; then
+  error "Download failed (HTTP $HTTP_CODE) for: $DOWNLOAD_URL"
+  echo ""
+  echo "Possible causes:"
+  echo "  - Wrong PATCHFLY_BINARY_URL (check spelling, must end without trailing slash)"
+  echo "  - Version $VERSION not released yet"
+  echo "  - Bucket not public / not configured for public read"
+  exit 1
+fi
+
+# Verify SHA-256 if available
+SHA_URL="${BINARY_URL}/cli/${VERSION_PATH}/${ASSET}.sha256"
+SHA_FILE="$TMP/${ASSET}.sha256"
+if command -v curl >/dev/null 2>&1 && curl -sSL -o "$SHA_FILE" "$SHA_URL" 2>/dev/null && [ -s "$SHA_FILE" ]; then
+  info "Verifying SHA-256..."
+  EXPECTED=$(awk '{print $1}' "$SHA_FILE")
+  if command -v shasum >/dev/null 2>&1; then
+    ACTUAL=$(shasum -a 256 "$TMP/$BINARY_NAME" | awk '{print $1}')
+  elif command -v sha256sum >/dev/null 2>&1; then
+    ACTUAL=$(sha256sum "$TMP/$BINARY_NAME" | awk '{print $1}')
+  fi
+  if [ -n "${ACTUAL:-}" ] && [ "$EXPECTED" = "$ACTUAL" ]; then
+    success "SHA-256 verified"
   else
-    warn "Prebuilt binary not available (HTTP $HTTP_CODE)"
+    warn "SHA-256 mismatch — file may be corrupted"
+    warn "  expected: $EXPECTED"
+    warn "  actual:   ${ACTUAL:-unknown}"
   fi
 fi
 
-# ---------------------------------------------------------------------------
-# Fallback: build from source
-# ---------------------------------------------------------------------------
-if [ "$INSTALLED" = false ]; then
-  info "Falling back to build-from-source..."
-
-  if ! command -v dart >/dev/null 2>&1; then
-    error "Dart SDK not found. Install from https://dart.dev/get-dart"
-    error "Or wait for the first official release."
-    exit 1
-  fi
-  if ! command -v git >/dev/null 2>&1; then
-    error "git not found. Install git or wait for the first official release."
-    exit 1
-  fi
-
-  info "Cloning $REPO..."
-  git clone --depth 1 "https://github.com/${REPO}.git" "$TMP/repo" 2>&1 | tail -1
-
-  info "Building with Dart SDK..."
-  ( cd "$TMP/repo/cli" && dart pub get && dart compile exe bin/patchfly.dart -o "$TMP/$BINARY_NAME" )
-
-  success "Built from source ($(du -h "$TMP/$BINARY_NAME" | cut -f1))"
-  INSTALLED=true
-fi
+success "Downloaded $(du -h "$TMP/$BINARY_NAME" | cut -f1)"
+INSTALLED=true
 
 # ---------------------------------------------------------------------------
 # Install
@@ -145,8 +153,6 @@ fi
 # PATH setup
 # ---------------------------------------------------------------------------
 PATH_LINE="export PATH=\"\$PATH:$INSTALL_DIR\""
-
-# Detect shell rc file
 SHELL_RC=""
 case "${SHELL:-/bin/bash}" in
   */zsh)  SHELL_RC="$HOME/.zshrc" ;;
@@ -154,7 +160,6 @@ case "${SHELL:-/bin/bash}" in
   */fish) SHELL_RC="$HOME/.config/fish/config.fish" ;;
 esac
 
-# Check if already in PATH
 case ":$PATH:" in
   *":$INSTALL_DIR:"*) in_path=true ;;
   *) in_path=false ;;
@@ -162,9 +167,9 @@ esac
 
 echo ""
 if [ "$in_path" = true ]; then
-  success "Already in PATH — you can run: $BINARY_NAME --version"
+  success "Already in PATH — run: $BINARY_NAME --version"
 else
-  warn "Not in PATH yet. To finish installation, add this to your shell:"
+  warn "Not in PATH yet. Add to your shell rc:"
   echo ""
   printf "  ${BOLD}%s${RESET}\n" "$PATH_LINE"
   echo ""
@@ -175,7 +180,7 @@ else
       echo "" >> "$SHELL_RC"
       echo "# Patchfly CLI" >> "$SHELL_RC"
       echo "$PATH_LINE" >> "$SHELL_RC"
-      success "Added to $SHELL_RC — restart your shell or: source $SHELL_RC"
+      success "Added to $SHELL_RC — restart shell or: source $SHELL_RC"
     fi
   fi
 fi
@@ -185,6 +190,6 @@ info "Verify installation:"
 echo "  $BINARY_PATH --version"
 echo ""
 info "Quick start:"
-echo "  patchfly register --email you@example.com --password yourpass"
-echo "  patchfly apps create --slug com.example.app --name \"My App\""
-echo "  patchfly patch"
+echo "  $BINARY_NAME register --email you@example.com --password yourpass"
+echo "  $BINARY_NAME apps create --slug com.example.app --name \"My App\""
+echo "  $BINARY_NAME patch"

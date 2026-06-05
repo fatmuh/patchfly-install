@@ -1,20 +1,20 @@
 # Patchfly CLI installer for Windows (PowerShell).
 #
-# Usage (run in PowerShell as Regular user):
-#   Set-ExecutionPolicy RemoteSigned -scope CurrentUser
-#   iwr -UseBasicParsing 'https://raw.githubusercontent.com/fatmuh/patchfly/main/install/install.ps1'|iex
+# Usage (R2/S3):
+#   $env:PATCHFLY_BINARY_URL = "https://pub-xxx.r2.dev"
+#   iwr -UseBasicParsing 'https://raw.githubusercontent.com/fatmuh/patchfly-install/main/install.ps1'|iex
 #
-# Options (env vars):
-#   $env:PATCHFLY_VERSION    Specific version to install (default: latest)
-#   $env:PATCHFLY_INSTALL    Install location (default: $env:USERPROFILE\.patchfly\bin)
-#   $env:PATCHFLY_REPO       GitHub repo (default: fatmuh/patchfly)
+# Environment variables:
+#   $env:PATCHFLY_BINARY_URL   Base URL of the S3/R2 public bucket (REQUIRED)
+#   $env:PATCHFLY_VERSION      Version to install (default: latest)
+#   $env:PATCHFLY_INSTALL      Install location (default: $env:USERPROFILE\.patchfly\bin)
 
 $ErrorActionPreference = 'Stop'
 
-$Repo = if ($env:PATCHFLY_REPO) { $env:PATCHFLY_REPO } else { 'fatmuh/patchfly' }
 $BinaryName = 'patchfly.exe'
 $InstallDir = if ($env:PATCHFLY_INSTALL) { $env:PATCHFLY_INSTALL } else { Join-Path $env:USERPROFILE '.patchfly\bin' }
 $Version = if ($env:PATCHFLY_VERSION) { $env:PATCHFLY_VERSION } else { 'latest' }
+$BinaryUrl = if ($env:PATCHFLY_BINARY_URL) { $env:PATCHFLY_BINARY_URL } else { '' }
 
 # ---------------------------------------------------------------------------
 # Pretty output
@@ -38,89 +38,72 @@ $Asset = "patchfly-$OS-$Arch.exe"
 Info "Detected: $OS / $Arch"
 
 # ---------------------------------------------------------------------------
+# Validate config
+# ---------------------------------------------------------------------------
+if (-not $BinaryUrl) {
+  Error 'PATCHFLY_BINARY_URL is not set.'
+  Write-Host ''
+  Write-Host '  PATCHFLY_BINARY_URL should be the public URL of your S3/R2 bucket,' -ForegroundColor Gray
+  Write-Host '  e.g. https://pub-xxxxxxxx.r2.dev or https://cdn.patchfly.dev' -ForegroundColor Gray
+  Write-Host ''
+  Write-Host 'Full example:' -ForegroundColor Gray
+  Write-Host '  $env:PATCHFLY_BINARY_URL = "https://pub-xxxxxxxx.r2.dev"' -ForegroundColor Gray
+  Write-Host '  iwr -UseBasicParsing https://raw.githubusercontent.com/fatmuh/patchfly-install/main/install.ps1 | iex' -ForegroundColor Gray
+}
+$BinaryUrl = $BinaryUrl.TrimEnd('/')
+
+# ---------------------------------------------------------------------------
 # Resolve version
 # ---------------------------------------------------------------------------
-if ($Version -eq 'latest') {
-  Info 'Resolving latest version...'
-  try {
-    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" -TimeoutSec 10
-    $Version = $release.tag_name.TrimStart('v')
-    Success "Latest version: v$Version"
-  } catch {
-    Warn 'Could not resolve latest version (no releases yet or no network).'
-    $Version = '0.0.0-source'
-  }
-} else {
-  Info "Requested version: v$Version"
-}
+$VersionPath = if ($Version -eq 'latest') { 'latest' } else { "v$Version" }
+Success "Version: $VersionPath"
 
 # ---------------------------------------------------------------------------
 # Set up temp dir
 # ---------------------------------------------------------------------------
 $Tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("patchfly-install-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory -Path $Tmp | Out-Null
-$Downloaded = $false
 
 try {
-  # ---------------------------------------------------------------------------
-  # Try downloading prebuilt binary
-  # ---------------------------------------------------------------------------
-  if ($Version -ne '0.0.0-source') {
-    $ReleaseUrl = "https://github.com/$Repo/releases/download/v$Version/$Asset"
-    Info "Trying prebuilt binary: $ReleaseUrl"
+  $DownloadUrl = "$BinaryUrl/cli/$VersionPath/$Asset"
+  Info "Downloading: $DownloadUrl"
 
-    $Target = Join-Path $Tmp $BinaryName
-    try {
-      [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-      Invoke-WebRequest -Uri $ReleaseUrl -OutFile $Target -UseBasicParsing -ErrorAction Stop
-      if ((Get-Item $Target).Length -gt 0) {
-        $Downloaded = $true
-        $Size = [math]::Round((Get-Item $Target).Length / 1MB, 2)
-        Success "Downloaded prebuilt binary ($Size MB)"
+  $Target = Join-Path $Tmp $BinaryName
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  try {
+    Invoke-WebRequest -Uri $DownloadUrl -OutFile $Target -UseBasicParsing -ErrorAction Stop
+  } catch {
+    $code = $_.Exception.Response.StatusCode.value__
+    if (-not $code) { $code = 'unknown' }
+    Error "Download failed (HTTP $code) for: $DownloadUrl"
+  }
+
+  if (-not (Test-Path $Target) -or (Get-Item $Target).Length -eq 0) {
+    Error "Downloaded file is empty or missing: $DownloadUrl"
+  }
+
+  # Verify SHA-256 if available
+  $ShaUrl = "$BinaryUrl/cli/$VersionPath/$Asset.sha256"
+  $ShaFile = Join-Path $Tmp "$Asset.sha256"
+  try {
+    Invoke-WebRequest -Uri $ShaUrl -OutFile $ShaFile -UseBasicParsing -ErrorAction Stop
+    if (Test-Path $ShaFile) {
+      $expected = (Get-Content $ShaFile -First 1).Split(' ')[0].ToLower()
+      $actual = (Get-FileHash -Algorithm SHA256 $Target).Hash.ToLower()
+      if ($expected -eq $actual) {
+        Success 'SHA-256 verified'
+      } else {
+        Warn "SHA-256 mismatch"
+        Warn "  expected: $expected"
+        Warn "  actual:   $actual"
       }
-    } catch {
-      $code = $_.Exception.Response.StatusCode.value__
-      Warn "Prebuilt binary not available (HTTP $code)"
     }
+  } catch {
+    # SHA file not available — skip verification (not fatal)
   }
 
-  # ---------------------------------------------------------------------------
-  # Fallback: build from source
-  # ---------------------------------------------------------------------------
-  if (-not $Downloaded) {
-    Info 'Falling back to build-from-source...'
-
-    $dart = Get-Command dart -ErrorAction SilentlyContinue
-    if (-not $dart) {
-      Error 'Dart SDK not found. Install from https://dart.dev/get-dart'
-      Error 'Or wait for the first official release.'
-    }
-    $git = Get-Command git -ErrorAction SilentlyContinue
-    if (-not $git) {
-      Error 'git not found. Install git for Windows or wait for the first official release.'
-    }
-
-    Info "Cloning $Repo..."
-    $RepoDir = Join-Path $Tmp 'repo'
-    & git clone --depth 1 "https://github.com/$Repo.git" $RepoDir 2>&1 | Select-Object -Last 1
-
-    Info 'Building with Dart SDK...'
-    Push-Location (Join-Path $RepoDir 'cli')
-    try {
-      & dart pub get | Out-Null
-      & dart compile exe bin/patchfly.dart -o (Join-Path $Tmp $BinaryName) | Out-Null
-    } finally {
-      Pop-Location
-    }
-
-    if (Test-Path (Join-Path $Tmp $BinaryName)) {
-      $Downloaded = $true
-      $Size = [math]::Round((Get-Item (Join-Path $Tmp $BinaryName)).Length / 1MB, 2)
-      Success "Built from source ($Size MB)"
-    } else {
-      Error 'Build failed — see output above'
-    }
-  }
+  $Size = [math]::Round((Get-Item $Target).Length / 1MB, 2)
+  Success "Downloaded $Size MB"
 
   # ---------------------------------------------------------------------------
   # Install
@@ -129,7 +112,7 @@ try {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
   }
   $BinaryPath = Join-Path $InstallDir $BinaryName
-  Move-Item -Force (Join-Path $Tmp $BinaryName) $BinaryPath
+  Move-Item -Force $Target $BinaryPath
   Success "Installed to: $BinaryPath"
 
   # ---------------------------------------------------------------------------
@@ -142,10 +125,9 @@ try {
     Warn 'Not in PATH yet. Adding to user PATH...'
     [Environment]::SetEnvironmentVariable('Path', "$currentPath;$InstallDir", 'User')
     $env:Path = "$env:Path;$InstallDir"
-    Success "Added $InstallDir to user PATH (current shell updated; restart shell for persistence)"
+    Success "Added $InstallDir to user PATH (current shell updated; new shells will need restart)"
 
-    # Persist for new shells too
-    Warn "To persist in ALL new PowerShell windows, run this once:"
+    Warn 'To persist for ALL new PowerShell windows, run this once:'
     Write-Host '  [Environment]::SetEnvironmentVariable("Path", $env:Path, "User")' -ForegroundColor DarkGray
   }
 
