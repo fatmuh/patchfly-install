@@ -44,10 +44,16 @@ if (-not $BinaryUrl) {
   Error 'PATCHFLY_BINARY_URL is not set.'
   Write-Host ''
   Write-Host '  PATCHFLY_BINARY_URL should be the public URL of your S3/R2 bucket,' -ForegroundColor Gray
-  Write-Host '  e.g. https://pub-xxxxxxxx.r2.dev or https://cdn.patchfly.dev' -ForegroundColor Gray
+  Write-Host '  e.g. https://pub-xxxxxxxx.r2.dev' -ForegroundColor Gray
+  Write-Host '       https://s3.idcloudhost.com/moccilabs/patchfly' -ForegroundColor Gray
+  Write-Host '       https://cdn.patchfly.dev' -ForegroundColor Gray
   Write-Host ''
-  Write-Host 'Full example:' -ForegroundColor Gray
+  Write-Host 'Full example (R2):' -ForegroundColor Gray
   Write-Host '  $env:PATCHFLY_BINARY_URL = "https://pub-xxxxxxxx.r2.dev"' -ForegroundColor Gray
+  Write-Host '  iwr -UseBasicParsing https://raw.githubusercontent.com/fatmuh/patchfly-install/main/install.ps1 | iex' -ForegroundColor Gray
+  Write-Host ''
+  Write-Host 'Full example (IDCloudHost S3):' -ForegroundColor Gray
+  Write-Host '  $env:PATCHFLY_BINARY_URL = "https://s3.idcloudhost.com/moccilabs/patchfly"' -ForegroundColor Gray
   Write-Host '  iwr -UseBasicParsing https://raw.githubusercontent.com/fatmuh/patchfly-install/main/install.ps1 | iex' -ForegroundColor Gray
 }
 $BinaryUrl = $BinaryUrl.TrimEnd('/')

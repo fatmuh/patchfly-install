@@ -63,8 +63,12 @@ if [ -z "$BINARY_URL" ]; then
   echo "  PATCHFLY_BINARY_URL should be the public URL of your S3/R2 bucket,"
   echo "  e.g. https://pub-xxxxxxxx.r2.dev or https://cdn.patchfly.dev"
   echo ""
-  echo "Full example:"
+  echo "Full example (R2):"
   echo "  PATCHFLY_BINARY_URL='https://pub-xxxxxxxx.r2.dev' \\"
+  echo "    curl --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/fatmuh/patchfly-install/main/install.sh -sSf | bash"
+  echo ""
+  echo "Full example (IDCloudHost S3):"
+  echo "  PATCHFLY_BINARY_URL='https://s3.idcloudhost.com/moccilabs/patchfly' \\"
   echo "    curl --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/fatmuh/patchfly-install/main/install.sh -sSf | bash"
   exit 1
 fi
