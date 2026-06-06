@@ -1,5 +1,12 @@
 # Patchfly CLI installer for Windows (PowerShell).
 #
+# Copyright (c) 2024 Shorebird Labs, Inc. and Patchfly contributors
+# Licensed under MIT and Apache License, Version 2.0
+#
+# Original work by the Patchfly contributors; not derived from
+# the upstream Shorebird installer. See LICENSE-MIT and
+# LICENSE-APACHE in this repository for the full license texts.
+#
 # One-liner (no setup required):
 #   iwr -UseBasicParsing 'https://raw.githubusercontent.com/fatmuh/patchfly-install/main/install.ps1'|iex
 #

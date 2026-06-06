@@ -123,3 +123,14 @@ The release workflow at `fatmuh/patchfly/.github/workflows/release.yml` builds b
 GitHub's `GITHUB_TOKEN` cannot write to a different repo than the one the workflow runs in. For our setup (private source + public binaries), that would require a Personal Access Token. S3-compatible storage avoids this entirely — the workflow uses standard AWS credentials and uploads to your own bucket.
 
 **Source code stays 100% private** in `fatmuh/patchfly`. **Only binaries** (compiled executables, no source) are in the S3/R2 bucket.
+
+## License
+
+These install scripts are part of **Patchfly**, a fork of [Shorebird](https://github.com/shorebirdtech/shorebird) by Shorebird Labs, Inc. The scripts are distributed under the same dual license as the main project:
+
+- **[MIT License](LICENSE-MIT)** — Copyright (c) 2024 Shorebird Labs, Inc. and Patchfly contributors
+- **[Apache License 2.0](LICENSE-APACHE)** — Copyright (c) 2024 Shorebird Labs, Inc. and Patchfly contributors
+
+The install scripts are original work by the Patchfly contributors and are licensed under the same dual MIT + Apache 2.0 terms. The scripts do not include any source code from the upstream Shorebird installer; they are written from scratch against the documented Patchfly install flow.
+
+See [`NOTICE`](NOTICE) for the full attribution chain, and <https://github.com/fatmuh/patchfly> for the main project repository.
